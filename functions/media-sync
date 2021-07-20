@@ -1,0 +1,132 @@
+#!/usr/bin/env zsh
+
+media-sync() {
+  # set paths
+  local sonarr_src
+  local sonarr_dest
+  local radarr_src
+  local radarr_dest
+  local bwlimit
+  local tmux_session
+  local rclone_config
+
+  zstyle -s :plugins:media-sync sonarr_src sonarr_src
+  zstyle -s :plugins:media-sync sonarr_dest sonarr_dest
+  zstyle -s :plugins:media-sync radarr_src radarr_src
+  zstyle -s :plugins:media-sync radarr_dest radarr_dest
+  zstyle -s :plugins:media-sync bwlimit bwlimit
+  zstyle -s :plugins:media-sync tmux_session tmux_session
+  zstyle -s :plugins:media-sync rclone_config rclone_config
+
+  tmux_session="${tmux_session:-media-sync}"
+  rclone_config="${rclone_config:-$HOME/.config/rclone/rclone.conf}"
+
+  # funcion to check if a tmux session exists
+  function ms_tmux_session_exists() {
+    # list tmux sessions, print the first column, and compare it against the expected session name
+    if tmux ls 2>/dev/null | awk -F ": " '{ print $1 }' | grep "$tmux_session" >/dev/null; then
+      return 0
+    else
+      return 1
+    fi
+  }
+
+  # function to attach to a tmux session
+  function ms_tmux_attach_session() {
+    # only try to attach if there's a tmux session open
+    if ms_tmux_session_exists; then
+      # if inside an existing tmux session we must unset $TMUX to allow nesting
+      if test -z "$TMUX"; then
+        tmux attach-session -t "$tmux_session"
+      else
+        TMUX=""
+        tmux attach-session -t "$tmux_session"
+      fi
+    else
+      echo "$fg[blue]media-sync isn't currently running$reset_color"
+    fi
+  }
+
+  # function to run a command in a tmux session
+  function ms_tmux_run() {
+    # test to see if the script is already running
+    if ! ms_tmux_session_exists; then
+      # if a tmux session we must unset $TMUX to allow nesting
+      if test -z "$TMUX"; then
+        tmux new-session -d -s "$tmux_session" "$*"
+      else
+        TMUX=""
+        tmux new-session -d -s "$tmux_session" "$*"
+      fi
+    fi
+
+    # attach if not from a cron/service job
+    if test "$_MS_CRON" != "true"; then
+      ms_tmux_attach_session
+    fi
+  }
+
+  # test for rclone
+  if (( ! $+commands[rclone] )); then
+    echo "$fg_bold[red]rclone is required to use media-sync$reset_color"
+    return 1
+  fi
+  
+  # test for config variables
+  if test \
+    -z "$sonarr_src" \
+    -o -z "$sonarr_dest" \
+    -o -z "$radarr_src" \
+    -o -z "$radarr_dest"; then
+    echo "$fg_bold[red]you need to set the config variables to use media-sync$reset_color"
+  fi
+
+  # set some default runtime values
+  local ms_both=false
+
+  if test -n "$bwlimit"; then
+    local bwlimit_str="--bwlimit $bwlimit"
+  fi
+
+  local rclone_template="rclone sync -P --transfers=20 --config=$rclone_config $bwlimit_str"
+  local rclone_command=""
+
+  # chose which remotes to sync
+  case $1 in
+    sonarr|tv)
+      local rclone_command="\"$sonarr_src\" \"$sonarr_dest\""
+      ;;
+    radarr|movies)
+      local rclone_command="$radarr_src\" \"$radarr_dest\""
+      ;;
+    attach)
+      # attach to existing session if not run by cron
+      if test "$_MS_CRON" != "true"; then
+        ms_tmux_attach_session
+      fi
+
+      # exit without errors after viewing
+      exit 0
+      ;;
+    *)
+      ms_both=true
+  esac
+
+  # set some messages to print
+  local message_tv="echo \"$fg_bold[blue]Syncing TV...$reset_color\";"
+  local message_movies="echo \"$fg_bold[blue]Syncing Movies...$reset_color\";"
+  local message_one="echo \"$fg_bold[blue]Syncing $1...$reset_color\";"
+  
+  # run the thing
+  if $ms_both; then
+    # run both commands in a tmux session
+    ms_tmux_run "$message_tv $rclone_template $sonarr_src $sonarr_dest; $message_movies $rclone_template $radarr_src $radarr_dest"
+  else
+    # run the command in a tmux session
+    ms_tmux_run "$message_one $rclone_template $rclone_command"
+  fi
+
+  # show successful installation
+  echo "$fg_bold[green]Media synchronized successfully!$reset_color"
+}
+

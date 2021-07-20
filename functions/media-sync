@@ -120,7 +120,7 @@ media-sync() {
   # run the thing
   if $ms_both; then
     # run both commands in a tmux session
-    ms_tmux_run "$message_tv $rclone_template $sonarr_src $sonarr_dest; $message_movies $rclone_template $radarr_src $radarr_dest"
+    ms_tmux_run "$message_tv $rclone_template \"$sonarr_src\" \"$sonarr_dest\"; $message_movies $rclone_template \"$radarr_src\" \"$radarr_dest\""
   else
     # run the command in a tmux session
     ms_tmux_run "$message_one $rclone_template $rclone_command"
